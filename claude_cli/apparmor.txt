@@ -1,0 +1,57 @@
+#include <tunables/global>
+
+profile claude_cli flags=(attach_disconnected,mediate_deleted) {
+  #include <abstractions/base>
+
+  # Network access for bridge API server and Claude API calls
+  network inet stream,
+  network inet6 stream,
+  network inet dgram,
+  network inet6 dgram,
+
+  # Python interpreter and bridge server
+  /usr/bin/python3* ix,
+  /usr/lib/python3/** r,
+  /usr/lib/python3/dist-packages/** r,
+
+  # Claude CLI binary
+  /usr/local/bin/claude ix,
+  /opt/claude/** r,
+  /opt/claude/.local/bin/claude ix,
+
+  # Bridge server code
+  /opt/bridge/** r,
+  /opt/defaults/** r,
+  /opt/config.yaml r,
+
+  # Persistent data directory (auth, config, sessions, environment)
+  /data/ r,
+  /data/** rwk,
+
+  # SSH daemon
+  /usr/sbin/sshd ix,
+  /etc/ssh/** rw,
+  /run/sshd/ rw,
+  /run/sshd/** rw,
+
+  # Temporary files
+  /tmp/ r,
+  /tmp/** rwk,
+
+  # Proc filesystem (required by Python and subprocess management)
+  @{PROC}/@{pid}/fd/ r,
+  @{PROC}/@{pid}/stat r,
+  @{PROC}/@{pid}/status r,
+  @{PROC}/sys/kernel/random/uuid r,
+
+  # Standard system libraries
+  /lib/** rm,
+  /usr/lib/** rm,
+  /usr/share/** r,
+
+  # Deny dangerous operations
+  deny /proc/sys/kernel/core_pattern w,
+  deny /sys/** w,
+  deny /boot/** rwx,
+  deny /root/.bash_history rw,
+}

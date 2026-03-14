@@ -1,0 +1,36 @@
+{
+  "entity": {
+    "ai_task": {
+      "ai_task_data": {
+        "default": "mdi:asterisk"
+      }
+    },
+    "binary_sensor": {
+      "addon_healthy": {
+        "default": "mdi:heart-pulse"
+      }
+    },
+    "conversation": {
+      "conversation": {
+        "default": "mdi:chat"
+      }
+    },
+    "sensor": {
+      "auth_status": {
+        "default": "mdi:shield-key"
+      },
+      "active_model": {
+        "default": "mdi:brain"
+      },
+      "cli_version": {
+        "default": "mdi:file-document-check"
+      },
+      "active_sessions": {
+        "default": "mdi:chat-processing"
+      }
+    }
+  },
+  "services": {
+    "reload_environment": "mdi:refresh"
+  }
+}

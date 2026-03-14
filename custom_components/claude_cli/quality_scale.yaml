@@ -1,0 +1,153 @@
+rules:
+  # Bronze
+  action-setup:
+    status: done
+    comment: "reload_environment service registered in async_setup_entry with guard."
+  appropriate-polling:
+    status: done
+    comment: "Health polling every 60 seconds via DataUpdateCoordinator."
+  brands:
+    status: exempt
+    comment: "Custom component, not in core brands registry."
+  common-modules:
+    status: done
+    comment: "Shared base entity in entity.py, coordinator in coordinator.py."
+  config-flow:
+    status: done
+    comment: "UI config flow with hassio discovery and manual setup."
+  config-flow-test-coverage:
+    status: todo
+    comment: "Tests not yet written."
+  dependency-transparency:
+    status: done
+    comment: "No external pip dependencies; aiohttp is bundled with HA."
+  docs-actions:
+    status: done
+    comment: "reload_environment service documented in services.yaml and strings.json."
+  docs-high-level-description:
+    status: done
+    comment: "README.md and DOCS.md describe the integration and addon."
+  docs-installation-instructions:
+    status: done
+    comment: "README.md contains step-by-step installation guide."
+  docs-removal-instructions:
+    status: done
+    comment: "Standard HA integration removal via Settings > Integrations."
+  entity-event-setup:
+    status: exempt
+    comment: "No event subscriptions; uses DataUpdateCoordinator pattern."
+  entity-unique-id:
+    status: done
+    comment: "All entities have unique IDs from entry_id or subentry_id."
+  has-entity-name:
+    status: done
+    comment: "All entities set _attr_has_entity_name = True."
+  runtime-data:
+    status: done
+    comment: "ClaudeCLIRuntimeData stored in entry.runtime_data."
+  test-before-configure:
+    status: done
+    comment: "Config flow validates bridge connectivity before creating entry."
+  test-before-setup:
+    status: done
+    comment: "async_setup_entry validates bridge and raises ConfigEntryNotReady."
+  unique-config-entry:
+    status: done
+    comment: "Config flow uses _async_abort_entries_match to prevent duplicates."
+
+  # Silver
+  action-exceptions:
+    status: done
+    comment: "Service call logs errors and raises on bridge failures."
+  config-entry-unloading:
+    status: done
+    comment: "async_unload_entry closes session and removes service."
+  docs-configuration-parameters:
+    status: done
+    comment: "All subentry options documented in strings.json data_description."
+  docs-installation-parameters:
+    status: done
+    comment: "Config flow steps have data_description for all fields."
+  entity-unavailable:
+    status: done
+    comment: "Sensors inherit CoordinatorEntity unavailability; binary_sensor always available by design."
+  integration-owner:
+    status: done
+    comment: "@miouzikal in codeowners."
+  log-when-unavailable:
+    status: done
+    comment: "Coordinator logs UpdateFailed with error details."
+  parallel-updates:
+    status: exempt
+    comment: "No entity platform updates; all data from coordinator."
+  reauthentication-flow:
+    status: exempt
+    comment: "Auth is handled at the addon level (SSH + setup-token), not the integration."
+  test-coverage:
+    status: todo
+    comment: "Tests not yet written."
+
+  # Gold
+  devices:
+    status: done
+    comment: "Creates service devices per subentry and per config entry."
+  diagnostics:
+    status: done
+    comment: "diagnostics.py with redaction of shared_secret and prompt."
+  discovery:
+    status: done
+    comment: "Hassio addon discovery via config.yaml discovery block."
+  discovery-update-info:
+    status: exempt
+    comment: "Bridge URL is static; no network info to update."
+  docs-data-update:
+    status: done
+    comment: "DOCS.md explains health polling and bridge communication."
+  docs-examples:
+    status: todo
+    comment: "Automation examples not yet documented."
+  docs-known-limitations:
+    status: done
+    comment: "DOCS.md troubleshooting section covers limitations."
+  docs-supported-devices:
+    status: exempt
+    comment: "Service integration, not a device integration."
+  docs-supported-functions:
+    status: done
+    comment: "DOCS.md describes conversation, AI task, sensors, and services."
+  docs-troubleshooting:
+    status: done
+    comment: "DOCS.md has comprehensive troubleshooting section."
+  docs-use-cases:
+    status: done
+    comment: "README.md describes voice control, automation, and chat use cases."
+  dynamic-devices:
+    status: done
+    comment: "Subentry add/remove callbacks create/remove devices dynamically."
+  entity-category:
+    status: exempt
+    comment: "All entities are primary (conversation, ai_task) or diagnostic (sensors)."
+  entity-device-class:
+    status: done
+    comment: "Binary sensor uses BinarySensorDeviceClass.CONNECTIVITY."
+  entity-disabled-by-default:
+    status: exempt
+    comment: "All entities are essential for operation."
+  entity-translations:
+    status: done
+    comment: "All entities have translation_key entries in strings.json."
+  exception-translations:
+    status: done
+    comment: "All exceptions use translation_domain/translation_key via strings.json exceptions section."
+  icon-translations:
+    status: done
+    comment: "icons.json defines icons for entities and services."
+  reconfiguration-flow:
+    status: done
+    comment: "ClaudeCLISubentryFlow supports reconfigure via async_step_reconfigure."
+  repair-issues:
+    status: done
+    comment: "Coordinator creates addon_unreachable and cli_not_authenticated repair issues."
+  stale-devices:
+    status: done
+    comment: "Subentry removal triggers entity/device cleanup."

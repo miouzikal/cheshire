@@ -1,0 +1,5 @@
+build_from:
+  amd64: "debian:bookworm-slim"
+  aarch64: "debian:bookworm-slim"
+args:
+  CLAUDE_CLI_VERSION: "2.1.76"

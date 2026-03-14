@@ -1,0 +1,75 @@
+configuration:
+  ssh_authorized_keys:
+    name: SSH Authorized Keys
+    description: >-
+      Public SSH keys allowed to connect to the addon container.
+      Used for CLI authentication (claude setup-token) and management.
+      One key per line, in standard OpenSSH format
+      (e.g. "ssh-ed25519 AAAAC3... user@host").
+  fast_model:
+    name: Fast Model
+    description: >-
+      Model used for quick, low-latency responses (light switches, simple questions).
+      Example: claude-haiku-4-5
+  default_model:
+    name: Default Model
+    description: >-
+      Model used for most conversations and general tasks.
+      Example: claude-sonnet-4-6
+  smart_model:
+    name: Smart Model
+    description: >-
+      Model used for complex reasoning, planning, and multi-step tasks.
+      Example: claude-opus-4-6
+  anthropic_api_key:
+    name: Anthropic API Key
+    description: >-
+      API key for Anthropic's Claude API. Leave empty if using
+      "claude setup-token" via SSH instead (recommended for Claude Max subscribers).
+  anthropic_base_url:
+    name: Custom API Base URL
+    description: >-
+      Override the API endpoint to use a local model server
+      (Ollama, LM Studio, vLLM, etc.). Leave empty for Anthropic's default API.
+      Example: http://192.168.1.100:11434/v1
+  anthropic_model:
+    name: Custom Model Override
+    description: >-
+      Override the model name sent to the API. Useful with custom API endpoints
+      for local models. Leave empty to use the configured fast/default/smart models.
+      Example: llama3.1:70b
+  anthropic_custom_headers:
+    name: Custom API Headers
+    description: >-
+      Additional HTTP headers sent with every API request.
+      Format: "Header1: value1, Header2: value2". Leave empty for default behavior.
+  max_output_tokens:
+    name: Max Output Tokens
+    description: >-
+      Maximum number of tokens in Claude's response (1,000–64,000).
+      Higher values allow longer responses but cost more. Default: 32,000.
+  max_thinking_tokens:
+    name: Max Thinking Tokens
+    description: >-
+      Token budget for Claude's extended thinking (chain-of-thought).
+      Set to 0 to disable extended thinking. Range: 0–128,000.
+  disable_telemetry:
+    name: Disable Telemetry
+    description: >-
+      Disable all non-essential network traffic from the Claude CLI,
+      including usage analytics and update checks.
+  request_timeout_seconds:
+    name: Request Timeout (seconds)
+    description: >-
+      Maximum time to wait for a response from the Claude CLI
+      before timing out (10–600 seconds). Default: 120.
+  max_tool_iterations:
+    name: Max Tool Iterations
+    description: >-
+      Maximum number of tool call round-trips per request (1–50).
+      Limits how many actions Claude can chain together. Default: 10.
+  log_level:
+    name: Log Level
+    description: >-
+      Verbosity of addon logs. "debug" for troubleshooting,
+      "info" for normal operation, "warning" or "error" for minimal output.

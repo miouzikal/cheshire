@@ -1,0 +1,165 @@
+{
+  "config": {
+    "abort": {
+      "already_configured": "[%key:common::config_flow::abort::already_configured_service%]"
+    },
+    "error": {
+      "cannot_connect": "[%key:common::config_flow::error::cannot_connect%]",
+      "invalid_auth": "[%key:common::config_flow::error::invalid_auth%]",
+      "invalid_url": "The bridge URL must start with http:// or https://.",
+      "unknown": "[%key:common::config_flow::error::unknown%]"
+    },
+    "step": {
+      "user": {
+        "data": {
+          "bridge_url": "Bridge URL",
+          "shared_secret": "Shared secret"
+        },
+        "data_description": {
+          "bridge_url": "URL of the Claude CLI addon bridge API (e.g. http://localhost:8099).",
+          "shared_secret": "The shared secret from the addon logs. SSH into the addon and run: cat /data/shared_secret"
+        },
+        "description": "Connect to the Claude CLI addon bridge. If the addon was auto-discovered, the URL is pre-filled."
+      },
+      "hassio_confirm": {
+        "data": {
+          "shared_secret": "Shared secret"
+        },
+        "data_description": {
+          "shared_secret": "The shared secret from the addon. SSH into the addon and run: cat /data/shared_secret"
+        },
+        "description": "The Claude CLI addon ({addon}) was discovered. Enter the shared secret to complete setup."
+      }
+    }
+  },
+  "config_subentries": {
+    "ai_task_data": {
+      "abort": {
+        "entry_not_loaded": "[%key:component::claude_cli::config_subentries::conversation::abort::entry_not_loaded%]",
+        "reconfigure_successful": "[%key:common::config_flow::abort::reconfigure_successful%]"
+      },
+      "entry_type": "AI task",
+      "initiate_flow": {
+        "reconfigure": "Reconfigure AI task",
+        "user": "Add AI task"
+      },
+      "step": {
+        "init": {
+          "data": {
+            "name": "[%key:common::config_flow::data::name%]",
+            "recommended": "[%key:component::claude_cli::config_subentries::conversation::step::init::data::recommended%]"
+          },
+          "data_description": {
+            "name": "[%key:component::claude_cli::config_subentries::conversation::step::init::data_description::name%]",
+            "recommended": "[%key:component::claude_cli::config_subentries::conversation::step::init::data_description::recommended%]"
+          },
+          "title": "[%key:component::claude_cli::config_subentries::conversation::step::init::title%]"
+        },
+        "advanced": {
+          "data": {
+            "model_hint": "[%key:component::claude_cli::config_subentries::conversation::step::advanced::data::model_hint%]"
+          },
+          "data_description": {
+            "model_hint": "[%key:component::claude_cli::config_subentries::conversation::step::advanced::data_description::model_hint%]"
+          },
+          "title": "[%key:component::claude_cli::config_subentries::conversation::step::advanced::title%]"
+        }
+      }
+    },
+    "conversation": {
+      "abort": {
+        "entry_not_loaded": "Cannot configure while the integration is disabled or not loaded.",
+        "reconfigure_successful": "[%key:common::config_flow::abort::reconfigure_successful%]"
+      },
+      "entry_type": "Conversation agent",
+      "initiate_flow": {
+        "reconfigure": "Reconfigure conversation agent",
+        "user": "Add conversation agent"
+      },
+      "step": {
+        "init": {
+          "data": {
+            "llm_hass_api": "[%key:common::config_flow::data::llm_hass_api%]",
+            "name": "[%key:common::config_flow::data::name%]",
+            "prompt": "[%key:common::config_flow::data::prompt%]",
+            "recommended": "Recommended settings"
+          },
+          "data_description": {
+            "llm_hass_api": "Allow Claude to control Home Assistant devices and services.",
+            "name": "Name for this conversation agent.",
+            "prompt": "Instructions for how Claude should respond. Supports templates.",
+            "recommended": "Use default configuration."
+          },
+          "title": "Basic settings"
+        },
+        "advanced": {
+          "data": {
+            "model_hint": "Model tier"
+          },
+          "data_description": {
+            "model_hint": "Which model to use: auto (default Sonnet), fast (Haiku), default (Sonnet), or smart (Opus)."
+          },
+          "title": "Advanced settings"
+        }
+      }
+    }
+  },
+  "entity": {
+    "conversation": {
+      "conversation": {
+        "name": "Conversation"
+      }
+    },
+    "ai_task": {
+      "ai_task_data": {
+        "name": "AI Task"
+      }
+    },
+    "sensor": {
+      "auth_status": {
+        "name": "Authentication status"
+      },
+      "active_model": {
+        "name": "Default model"
+      },
+      "cli_version": {
+        "name": "CLI version"
+      },
+      "active_sessions": {
+        "name": "Active sessions"
+      }
+    },
+    "binary_sensor": {
+      "addon_healthy": {
+        "name": "Addon health"
+      }
+    }
+  },
+  "issues": {
+    "addon_unreachable": {
+      "title": "Claude CLI addon unreachable",
+      "description": "The Claude CLI addon bridge is not responding. Verify that the addon is running and that the bridge URL is correct."
+    },
+    "cli_not_authenticated": {
+      "title": "Claude CLI not authenticated",
+      "description": "The Claude CLI is not authenticated. SSH into the addon and run `claude setup-token` to authenticate with your Claude subscription."
+    }
+  },
+  "exceptions": {
+    "bridge_error": {
+      "message": "Claude CLI bridge returned error status {status}."
+    },
+    "bridge_unreachable": {
+      "message": "Failed to communicate with the Claude CLI bridge."
+    },
+    "structured_response_parse_error": {
+      "message": "Claude CLI returned a response that could not be parsed as structured data."
+    }
+  },
+  "services": {
+    "reload_environment": {
+      "name": "Reload environment",
+      "description": "Reload CLAUDE.md, settings.json, and MCP configuration from disk on the addon."
+    }
+  }
+}

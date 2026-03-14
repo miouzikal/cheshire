@@ -1,0 +1,3 @@
+reload_environment:
+  name: Reload environment
+  description: Reload CLAUDE.md, settings.json, and MCP configuration from disk on the addon.

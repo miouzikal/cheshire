@@ -1,0 +1,15 @@
+{
+  "domain": "claude_cli",
+  "name": "Claude CLI",
+  "version": "0.1.0",
+  "codeowners": ["@miouzikal"],
+  "config_flow": true,
+  "dependencies": ["conversation"],
+  "after_dependencies": ["ai_task", "assist_pipeline", "intent"],
+  "documentation": "https://github.com/miouzikal/cheshire",
+  "issue_tracker": "https://github.com/miouzikal/cheshire/issues",
+  "integration_type": "service",
+  "iot_class": "local_polling",
+  "quality_scale": "silver",
+  "requirements": []
+}

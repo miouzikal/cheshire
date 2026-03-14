@@ -1,0 +1,63 @@
+name: Claude CLI
+version: "0.1.0"
+slug: claude_cli
+description: "Claude Code CLI bridge for Home Assistant — voice control, device automation, and AI tasks powered by Claude"
+url: "https://github.com/miouzikal/cheshire"
+arch:
+  - amd64
+  - aarch64
+stage: stable
+startup: application
+boot: auto
+init: true
+homeassistant: "2025.1.0"
+watchdog: "http://[HOST]:[PORT:8099]/health"
+ports:
+  8099/tcp: null
+  22/tcp: 2222
+ports_description:
+  8099/tcp: "Bridge API (internal only)"
+  22/tcp: "SSH access for CLI authentication and management"
+map:
+  - config:rw
+options:
+  # --- SSH Access ---
+  ssh_authorized_keys: []
+  # --- Model Configuration ---
+  fast_model: "claude-haiku-4-5"
+  default_model: "claude-sonnet-4-6"
+  smart_model: "claude-opus-4-6"
+  # --- API Authentication ---
+  anthropic_api_key: ""
+  # --- Custom API Endpoint (for local models via Ollama, LM Studio, etc.) ---
+  anthropic_base_url: ""
+  anthropic_model: ""
+  anthropic_custom_headers: ""
+  # --- Generation Limits ---
+  max_output_tokens: 32000
+  max_thinking_tokens: 0
+  # --- Behavior ---
+  disable_telemetry: true
+  request_timeout_seconds: 120
+  max_tool_iterations: 10
+  log_level: "info"
+schema:
+  ssh_authorized_keys:
+    - str
+  fast_model: str
+  default_model: str
+  smart_model: str
+  anthropic_api_key: "password?"
+  anthropic_base_url: "url?"
+  anthropic_model: "str?"
+  anthropic_custom_headers: "str?"
+  max_output_tokens: "int(1000,64000)"
+  max_thinking_tokens: "int(0,128000)"
+  disable_telemetry: bool
+  request_timeout_seconds: "int(10,600)"
+  max_tool_iterations: "int(1,50)"
+  log_level: list(debug|info|warning|error)
+discovery:
+  - service: claude_cli
+    config:
+      port: 8099
