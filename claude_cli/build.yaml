@@ -1,5 +1,5 @@
 build_from:
-  amd64: "debian:bookworm-slim"
-  aarch64: "debian:bookworm-slim"
+  amd64: "ghcr.io/home-assistant/amd64-base-debian:bookworm"
+  aarch64: "ghcr.io/home-assistant/aarch64-base-debian:bookworm"
 args:
   CLAUDE_CLI_VERSION: "2.1.76"
