@@ -21,22 +21,16 @@ ports_description:
 map:
   - config:rw
 options:
-  # --- SSH Access ---
   ssh_authorized_keys: []
-  # --- Model Configuration ---
   fast_model: "claude-haiku-4-5"
   default_model: "claude-sonnet-4-6"
   smart_model: "claude-opus-4-6"
-  # --- API Authentication ---
   anthropic_api_key: ""
-  # --- Custom API Endpoint (for local models via Ollama, LM Studio, etc.) ---
   anthropic_base_url: ""
   anthropic_model: ""
   anthropic_custom_headers: ""
-  # --- Generation Limits ---
   max_output_tokens: 32000
   max_thinking_tokens: 0
-  # --- Behavior ---
   disable_telemetry: true
   request_timeout_seconds: 120
   max_tool_iterations: 10
@@ -57,7 +51,3 @@ schema:
   request_timeout_seconds: "int(10,600)"
   max_tool_iterations: "int(1,50)"
   log_level: list(debug|info|warning|error)
-discovery:
-  - service: claude_cli
-    config:
-      port: 8099
