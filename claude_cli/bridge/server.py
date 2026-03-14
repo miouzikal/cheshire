@@ -17,6 +17,9 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import TypedDict
 
+# Ensure sibling modules are importable when run as `python3 /opt/bridge/server.py`
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
 from aiohttp import web
 
 from claude_client import SessionPool, one_shot_query

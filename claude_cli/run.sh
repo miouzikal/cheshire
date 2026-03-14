@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/with-contenv bash
 set -e
 
 # ============================================================================
@@ -140,7 +140,8 @@ setup_ssh || true
 # ----------------------------------------------------------------------------
 # Log startup information
 # ----------------------------------------------------------------------------
-echo "[claude_cli] Claude Code CLI version: $(claude --version 2>/dev/null || echo 'not found')"
+echo "[claude_cli] Addon version: ${ADDON_VERSION}"
+echo "[claude_cli] Claude Code CLI: $(claude --version 2>/dev/null || echo 'not found')"
 echo "[claude_cli] Bridge server starting on port 8099"
 
 # ----------------------------------------------------------------------------

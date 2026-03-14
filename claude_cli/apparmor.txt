@@ -3,6 +3,17 @@
 profile claude_cli flags=(attach_disconnected,mediate_deleted) {
   #include <abstractions/base>
 
+  # S6 overlay init system and general binaries
+  /init rix,
+  /run.sh rix,
+  /package/** rix,
+  /command/** rix,
+  /bin/** rix,
+  /usr/bin/** rix,
+  /usr/sbin/** rix,
+  /etc/s6-overlay/** r,
+  /run/** rwkix,
+
   # Network access for bridge API server and Claude API calls
   network inet stream,
   network inet6 stream,
@@ -14,13 +25,17 @@ profile claude_cli flags=(attach_disconnected,mediate_deleted) {
   /usr/lib/python3/** r,
   /usr/lib/python3/dist-packages/** r,
 
-  # Claude CLI binary
-  /usr/local/bin/claude ix,
+  # Claude CLI binary and locally installed tools (pip3, etc.)
+  /usr/local/bin/ r,
+  /usr/local/bin/** rix,
   /opt/claude/** r,
   /opt/claude/.local/bin/claude ix,
 
-  # Bridge server code
+  # Bridge server code (directory listing + file read)
+  /opt/ r,
+  /opt/bridge/ r,
   /opt/bridge/** r,
+  /opt/defaults/ r,
   /opt/defaults/** r,
   /opt/config.yaml r,
 
@@ -28,9 +43,15 @@ profile claude_cli flags=(attach_disconnected,mediate_deleted) {
   /data/ r,
   /data/** rwk,
 
-  # SSH daemon
-  /usr/sbin/sshd ix,
+  # Root home (SSH keys, shell config)
+  /root/** rwk,
+
+  # System configuration files (mime.types, resolv.conf, hosts, ssl certs, etc.)
+  /etc/ r,
+  /etc/** r,
   /etc/ssh/** rw,
+
+  # SSH daemon
   /run/sshd/ rw,
   /run/sshd/** rw,
 
@@ -44,9 +65,15 @@ profile claude_cli flags=(attach_disconnected,mediate_deleted) {
   @{PROC}/@{pid}/status r,
   @{PROC}/sys/kernel/random/uuid r,
 
-  # Standard system libraries
+  # Standard system libraries (need directory listing for Python module finder)
+  /lib/ r,
   /lib/** rm,
+  /usr/lib/ r,
   /usr/lib/** rm,
+  /usr/local/ r,
+  /usr/local/lib/ r,
+  /usr/local/lib/** rm,
+  /usr/share/ r,
   /usr/share/** r,
 
   # Deny dangerous operations

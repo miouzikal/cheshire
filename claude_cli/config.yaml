@@ -1,5 +1,5 @@
 name: Claude CLI
-version: "0.1.0"
+version: "0.1.12"
 slug: claude_cli
 description: "Claude Code CLI bridge for Home Assistant — voice control, device automation, and AI tasks powered by Claude"
 url: "https://github.com/miouzikal/cheshire"
