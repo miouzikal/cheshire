@@ -47,7 +47,7 @@ Install and start the **Claude CLI** addon.
 SSH into the addon and run:
 
 ```bash
-ssh root@homeassistant -p 2222
+ssh claude@homeassistant -p 2222
 claude setup-token
 ```
 
