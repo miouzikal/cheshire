@@ -9,7 +9,7 @@ arch:
 stage: stable
 startup: application
 boot: auto
-init: true
+init: false
 homeassistant: "2025.1.0"
 watchdog: "http://[HOST]:[PORT:8099]/health"
 ports:
