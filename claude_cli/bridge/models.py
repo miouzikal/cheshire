@@ -79,7 +79,6 @@ class TaskRequest:
 
     task_prompt: str
     model_hint: str | None = None
-    output_schema: dict[str, object] | None = None
 
 
 @dataclass

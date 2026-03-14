@@ -11,6 +11,8 @@ import os
 import secrets
 import stat
 import tempfile
+import time
+from collections import defaultdict
 from pathlib import Path
 
 from aiohttp import web
@@ -121,6 +123,59 @@ def auth_middleware(shared_secret: str) -> web.middleware:
             )
 
         request["authenticated_request"] = True
+        return await handler(request)
+
+    return middleware
+
+
+# Maximum requests per minute per remote address
+RATE_LIMIT_RPM = 60
+RATE_LIMIT_WINDOW = 60  # seconds
+
+
+def rate_limit_middleware() -> web.middleware:
+    """Create aiohttp middleware that enforces per-IP rate limiting.
+
+    Uses a sliding window counter. Health checks are exempt.
+
+    Returns:
+        An aiohttp middleware function.
+    """
+    # Map of remote_addr -> list of request timestamps
+    request_log: dict[str, list[float]] = defaultdict(list)
+
+    @web.middleware
+    async def middleware(
+        request: web.Request,
+        handler: web.RequestHandler,
+    ) -> web.StreamResponse:
+        # Exempt health, environment, and reload (low-frequency admin endpoints)
+        if request.path in ("/health", "/environment", "/reload"):
+            return await handler(request)
+
+        remote = request.remote or "unknown"
+        now = time.monotonic()
+        timestamps = request_log[remote]
+
+        # Prune old entries outside the window
+        cutoff = now - RATE_LIMIT_WINDOW
+        request_log[remote] = [t for t in timestamps if t > cutoff]
+        timestamps = request_log[remote]
+
+        # Remove empty entries to prevent unbounded dict growth
+        if not timestamps:
+            del request_log[remote]
+            timestamps = request_log[remote]  # re-creates via defaultdict
+
+        if len(timestamps) >= RATE_LIMIT_RPM:
+            logger.warning("Rate limit exceeded for %s", remote)
+            return web.json_response(
+                {"error": "Rate limit exceeded"},
+                status=429,
+                headers={"Retry-After": str(RATE_LIMIT_WINDOW)},
+            )
+
+        timestamps.append(now)
         return await handler(request)
 
     return middleware

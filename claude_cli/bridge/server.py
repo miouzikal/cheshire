@@ -35,7 +35,7 @@ from models import (
     TaskRequest,
     TaskResponse,
 )
-from security import auth_middleware, load_or_create_secret
+from security import auth_middleware, load_or_create_secret, rate_limit_middleware
 
 logger = logging.getLogger(__name__)
 
@@ -141,9 +141,8 @@ def _get_cli_version() -> str:
             text=True,
             timeout=5,
             env={
-                key: value
-                for key, value in os.environ.items()
-                if key != "CLAUDECODE"
+                "HOME": os.environ.get("HOME", "/data"),
+                "PATH": os.environ.get("PATH", "/usr/local/bin:/usr/bin:/bin"),
             },
         )
         if result.returncode == 0:
@@ -214,8 +213,12 @@ def _read_permissions() -> PermissionsSummary:
     if not settings_path.exists():
         return PermissionsSummary()
     try:
-        return json.loads(settings_path.read_text()).get("permissions", {})
-    except json.JSONDecodeError:
+        raw = json.loads(settings_path.read_text()).get("permissions", {})
+        return PermissionsSummary(
+            allow=raw.get("allow", []),
+            deny=raw.get("deny", []),
+        )
+    except (json.JSONDecodeError, AttributeError):
         return PermissionsSummary()
 
 
@@ -296,7 +299,7 @@ class BridgeServer:
         Args:
             application: The aiohttp application instance.
         """
-        await self._session_pool.stop()
+        await self._session_pool.stop(drain_timeout=10)
 
     async def handle_health(self, request: web.Request) -> web.Response:
         """Handle GET /health — return addon and CLI status.
@@ -354,11 +357,19 @@ class BridgeServer:
         except (json.JSONDecodeError, ValueError):
             return web.json_response({"error": "Invalid JSON body"}, status=400)
 
+        system_prompt = body.get("system_prompt")
+        if system_prompt is not None:
+            if not isinstance(system_prompt, str) or len(system_prompt) > 10_000:
+                return web.json_response(
+                    {"error": "system_prompt must be a string under 10KB"},
+                    status=400,
+                )
+
         converse_request = ConverseRequest(
             message_text=body.get("message_text", ""),
             conversation_session_id=body.get("conversation_session_id"),
             model_hint=body.get("model_hint"),
-            system_prompt=body.get("system_prompt"),
+            system_prompt=system_prompt,
         )
 
         if not converse_request.message_text.strip():
@@ -534,10 +545,9 @@ def create_application(shared_secret: str) -> web.Application:
         Configured aiohttp Application.
     """
     application = web.Application(
-        middlewares=[auth_middleware(shared_secret)],
+        middlewares=[rate_limit_middleware(), auth_middleware(shared_secret)],
         client_max_size=MAX_REQUEST_SIZE,
     )
-    application["shared_secret"] = shared_secret
 
     bridge = BridgeServer()
 

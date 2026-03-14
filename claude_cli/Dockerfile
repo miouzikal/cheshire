@@ -5,6 +5,9 @@ ARG CLAUDE_CLI_VERSION
 ARG BUILD_VERSION
 ARG BUILD_ARCH
 
+# Copy requirements first (needed inside monolithic RUN layer)
+COPY requirements.txt /tmp/requirements.txt
+
 # Single monolithic RUN — DinD builder has persistent cache that cannot be
 # cleared from the host. Separate RUN layers get stale-cached across builds.
 # Combining everything into one layer ensures either all or nothing is cached.
@@ -28,10 +31,7 @@ RUN set -eux \
     && /usr/local/bin/claude --version \
     && echo "=== Installing Python dependencies ===" \
     && pip3 install --no-cache-dir --break-system-packages \
-        claude-code-sdk==0.0.25 \
-        PyJWT==2.12.1 \
-        "cryptography>=46.0.0" \
-        aiohttp==3.11.18 \
+        -r /tmp/requirements.txt \
     && python3 -c "import aiohttp; print(f'aiohttp {aiohttp.__version__} OK')" \
     && useradd -r -m -d /home/claude -s /bin/bash -G tty claude \
     && echo "Build complete: version=${BUILD_VERSION} claude=${CLAUDE_CLI_VERSION}"
@@ -49,7 +49,9 @@ COPY config.yaml /opt/config.yaml
 COPY run.sh /run.sh
 RUN chmod +x /run.sh
 
-# Hardcoded environment variables (not user-configurable)
+# Build-time defaults — run.sh uses `env -i` + s6-envdir at runtime,
+# so these only apply during `docker build` (e.g. `claude --version` check).
+# Runtime telemetry vars are set via s6-envdir in run.sh.
 ENV DISABLE_AUTOUPDATER=1 \
     DISABLE_TELEMETRY=1 \
     CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY=1 \

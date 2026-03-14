@@ -1,12 +1,12 @@
 name: Claude CLI
-version: "0.1.21"
+version: "0.1.22"
 slug: claude_cli
 description: "Claude Code CLI bridge for Home Assistant — voice control, device automation, and AI tasks powered by Claude"
 url: "https://github.com/miouzikal/cheshire"
 arch:
   - amd64
   - aarch64
-stage: stable
+stage: experimental
 startup: application
 boot: auto
 init: false
@@ -19,7 +19,7 @@ ports_description:
   8099/tcp: "Bridge API (internal only)"
   22/tcp: "SSH access for CLI authentication and management"
 map:
-  - config:rw
+  - config:ro
 options:
   ssh_authorized_keys: []
   fast_model: "claude-haiku-4-5"

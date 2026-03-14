@@ -14,6 +14,8 @@ Voice Pipeline / Automation
   (custom_component)        (port 8099)           (subprocess)
 ```
 
+The bridge server runs as an unprivileged `claude` user (not root). Environment variables are injected via s6-envdir (file-based, no command-line leaks). The shared secret is generated atomically at startup with correct ownership.
+
 ## Prerequisites
 
 - A Claude subscription (Pro, Team, or Max) **or** an Anthropic API key.
@@ -35,7 +37,7 @@ The Claude CLI must be authenticated before use. There are two methods:
 ### Method 1: Setup Token (recommended for Claude Max)
 
 1. Add your SSH public key to the addon configuration.
-2. SSH into the addon: `ssh root@homeassistant -p 2222`
+2. SSH into the addon: `ssh claude@homeassistant -p 2222`
 3. Run: `claude setup-token`
 4. Follow the prompts to authenticate.
 
@@ -89,7 +91,7 @@ Public SSH keys allowed to connect to the addon container. Used for CLI authenti
 The addon's working directory is `/data/claude_environment/`. You can customize Claude's behavior by editing these files via SSH:
 
 - **`CLAUDE.md`** — System prompt and instructions. This is loaded as context for every conversation.
-- **`.claude/settings.json`** — Tool permissions (allow/deny lists).
+- **`.claude/settings.json`** — Tool permissions (allow/deny lists). The bridge uses `allowEdits` permission mode, which respects the deny list in settings.json.
 - **`mcp.json`** — MCP server configuration for extending Claude's capabilities.
 - **`.claude/commands/`** — Custom slash commands (Markdown files with YAML frontmatter).
 
@@ -99,15 +101,52 @@ After editing, call the **Reload Environment** service from Home Assistant or re
 
 The bridge server runs on port 8099 and exposes these endpoints:
 
-| Method | Path | Auth | Description |
-|--------|------|------|-------------|
-| `GET` | `/health` | Optional | Health status, CLI version, auth status, active sessions. |
-| `POST` | `/converse` | Required | Multi-turn conversation (uses session pool). |
-| `POST` | `/task` | Required | One-shot structured generation. |
-| `GET` | `/environment` | Required | Current environment configuration. |
-| `POST` | `/reload` | Required | Reload CLAUDE.md, settings, and MCP config from disk. |
+| Method | Path | Auth | Rate Limited | Description |
+|--------|------|------|-------------|-------------|
+| `GET` | `/health` | Optional | No | Unauthenticated: `{"status": "ok"}`. Authenticated: full health with CLI version, auth status, active sessions, configured models. |
+| `POST` | `/converse` | Required | Yes | Multi-turn conversation (uses session pool). |
+| `POST` | `/task` | Required | Yes | One-shot structured generation. |
+| `GET` | `/environment` | Required | No | Current environment configuration. |
+| `POST` | `/reload` | Required | No | Reload CLAUDE.md, settings, and MCP config from disk. |
 
 Authentication uses Bearer token: `Authorization: Bearer <shared_secret>`
+
+### Rate Limiting
+
+`/converse` and `/task` are rate-limited to **60 requests per minute per IP**. `/health` is exempt (used by the HA watchdog). Exceeding the limit returns HTTP 429 with a `Retry-After` header.
+
+### Input Validation
+
+| Field | Max Size |
+|-------|----------|
+| `system_prompt` | 10 KB |
+| `message_text` | 100 KB |
+| `task_prompt` | 100 KB |
+| Request body | 512 KB |
+
+## Security
+
+- **Unprivileged execution**: The bridge server runs as the `claude` user (not root), started via `s6-setuidgid`.
+- **Secret management**: The shared secret (64-character hex) is generated atomically (mktemp + mv) with owner-read-only permissions (mode 0400), owned by `claude:claude`. Environment variables are injected via s6-envdir (file-based), so secrets never appear in process command lines.
+- **SSH access**: Key-only authentication, runs as `claude` user (`PermitRootLogin no`, `AllowUsers claude`). PTY allocation uses a fresh devpts mount. Hardened config: no password auth, no tunneling, no forwarding, max 3 auth attempts, 30s login grace time.
+- **AppArmor**: Custom profile with deny rules for `/proc/sys/kernel/core_pattern`, `/sys/**`, `/boot/**`, and `/root/.bash_history`.
+- **Rate limiting**: 60 requests/minute per IP on `/converse` and `/task` endpoints.
+- **Permission mode**: `allowEdits` — the Claude CLI respects the deny list defined in `.claude/settings.json`.
+- **Dependencies**: Only `claude-code-sdk` and `aiohttp` (no PyJWT, no cryptography library).
+
+## SSH
+
+SSH runs on port 22 inside the container (mapped to host port 2222 by default). Connections authenticate as the `claude` user with key-only auth.
+
+```
+ssh claude@homeassistant -p 2222
+```
+
+Requirements:
+- At least one SSH public key configured in the addon options.
+- Key format: `ssh-ed25519 AAAA...` or `ssh-rsa AAAA...`.
+
+Host keys are persisted at `/data/.ssh_host_keys/` across restarts.
 
 ## Troubleshooting
 
@@ -130,14 +169,6 @@ Verify the addon is running. Check the addon logs for errors. Ensure the bridge 
 - Ensure you have added your SSH public key to the addon configuration.
 - Verify the SSH port mapping (default: 2222 on the host).
 - Check that the key format is correct (`ssh-ed25519 AAAA...` or `ssh-rsa AAAA...`).
-
-## Security
-
-- The bridge API is authenticated with a randomly generated shared secret (64-character hex string).
-- SSH access is key-only with hardened configuration (no password, no tunneling, max 3 auth attempts).
-- The Claude CLI runs with restricted tool permissions by default (file system access denied).
-- A custom AppArmor profile restricts the container's capabilities.
-- The shared secret file is stored with mode 0600 (owner-read only).
 
 ## Support
 

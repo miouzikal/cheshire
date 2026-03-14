@@ -89,7 +89,7 @@ def _build_options(
         option_arguments["cwd"] = default_options["cwd"]
     if default_options.get("env"):
         option_arguments["env"] = default_options["env"]
-    if default_options.get("max_turns"):
+    if default_options.get("max_turns") is not None:
         option_arguments["max_turns"] = default_options["max_turns"]
 
     # MCP servers config file
@@ -177,8 +177,15 @@ class SessionPool:
                 self._idle_timeout,
             )
 
-    async def stop(self) -> None:
-        """Stop cleanup and disconnect all sessions."""
+    async def stop(self, drain_timeout: float = 5.0) -> None:
+        """Stop cleanup and disconnect all sessions.
+
+        Waits up to drain_timeout seconds for in-use sessions to finish
+        before force-disconnecting them.
+
+        Args:
+            drain_timeout: Max seconds to wait for active sessions to complete.
+        """
         if self._cleanup_task is not None:
             self._cleanup_task.cancel()
             try:
@@ -186,6 +193,15 @@ class SessionPool:
             except asyncio.CancelledError:
                 pass
             self._cleanup_task = None
+
+        # Wait for in-use sessions to finish (up to drain_timeout)
+        deadline = time.monotonic() + drain_timeout
+        while time.monotonic() < deadline:
+            async with self._lock:
+                active = any(s.in_use for s in self._sessions.values())
+            if not active:
+                break
+            await asyncio.sleep(0.25)
 
         # Collect all clients to disconnect, then disconnect outside lock
         async with self._lock:
@@ -508,7 +524,7 @@ async def one_shot_query(
         option_arguments["cwd"] = cwd
     if env:
         option_arguments["env"] = env
-    if max_turns:
+    if max_turns is not None:
         option_arguments["max_turns"] = max_turns
     if mcp_config and Path(mcp_config).exists():
         option_arguments["mcp_servers"] = mcp_config

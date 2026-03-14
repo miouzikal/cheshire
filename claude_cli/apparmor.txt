@@ -3,7 +3,7 @@
 profile claude_cli flags=(attach_disconnected,mediate_deleted) {
   #include <abstractions/base>
 
-  # Capabilities needed by sshd (privilege separation, user switching)
+  # Capabilities needed for init (root) and sshd (privilege separation)
   capability chown,
   capability dac_override,
   capability setgid,
@@ -11,6 +11,9 @@ profile claude_cli flags=(attach_disconnected,mediate_deleted) {
   capability sys_chroot,
   capability kill,
   capability net_bind_service,
+  # sys_admin: required for `mount -t devpts` in run.sh to allocate PTYs
+  # for SSH sessions. HA Supervisor mounts /dev read-only with ptmxmode=000.
+  # Only used during init before privileges are dropped to claude user.
   capability sys_admin,
 
   # S6 overlay init system and general binaries

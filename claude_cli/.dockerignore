@@ -1,0 +1,10 @@
+__pycache__/
+*.pyc
+*.pyo
+.git/
+.gitignore
+.dockerignore
+README.md
+DOCS.md
+CHANGELOG.md
+logs/

@@ -35,20 +35,24 @@ fi
 # Export addon options as environment variables for Claude Code CLI
 # Only sets the variable if the option has a non-empty value.
 # ----------------------------------------------------------------------------
+# ----------------------------------------------------------------------------
+# Build s6-envdir directory — each env var is a file (no cmdline leaks)
+# ----------------------------------------------------------------------------
+ENVDIR="/tmp/bridge_envdir"
+rm -rf "$ENVDIR"
+mkdir -p "$ENVDIR"
+chmod 700 "$ENVDIR"
+
 export_if_set() {
     local key="$1"
     local var="$2"
     local val
     val=$(jq -r "if has(\"${key}\") then .${key} | tostring else \"\" end" "$CONFIG_PATH" 2>/dev/null)
     if [ -n "$val" ]; then
-        echo "${var}=${val}" >> /tmp/bridge_env
+        printf '%s' "$val" > "${ENVDIR}/${var}"
         echo "[claude_cli] Set ${var}"
     fi
 }
-
-# Create clean env file for the bridge process
-: > /tmp/bridge_env
-chmod 600 /tmp/bridge_env
 
 export_if_set "anthropic_api_key" "ANTHROPIC_API_KEY"
 export_if_set "anthropic_base_url" "ANTHROPIC_BASE_URL"
@@ -57,12 +61,18 @@ export_if_set "anthropic_custom_headers" "ANTHROPIC_CUSTOM_HEADERS"
 export_if_set "max_output_tokens" "CLAUDE_CODE_MAX_OUTPUT_TOKENS"
 export_if_set "max_thinking_tokens" "MAX_THINKING_TOKENS"
 
-TELEMETRY_OPTS="DISABLE_TELEMETRY=1 CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1"
 telemetry_disabled=$(jq -r '.disable_telemetry // true' "$CONFIG_PATH" 2>/dev/null)
 if [ "$telemetry_disabled" = "false" ]; then
-    TELEMETRY_OPTS=""
     echo "[claude_cli] Telemetry enabled by user configuration"
+else
+    printf '1' > "${ENVDIR}/DISABLE_TELEMETRY"
+    printf '1' > "${ENVDIR}/CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC"
 fi
+
+# Make envdir readable only by claude user
+chown -R claude:claude "$ENVDIR"
+chmod 500 "$ENVDIR"
+chmod 400 "${ENVDIR}"/*
 
 # ----------------------------------------------------------------------------
 # Configure and start SSH daemon (key-only authentication)
@@ -159,22 +169,28 @@ echo "[claude_cli] Bridge server starting on port 8099"
 # -u: unbuffered stdout/stderr for real-time log output
 # ----------------------------------------------------------------------------
 
-# Generate shared secret as root (claude user can't write to /data/)
+# Generate shared secret atomically with correct ownership from the start
 if [ ! -f /data/shared_secret ] || [ ! -s /data/shared_secret ]; then
-    python3 -c "import secrets; print(secrets.token_hex(32), end='')" > /data/shared_secret
-    chmod 600 /data/shared_secret
+    SECRET_TMP=$(mktemp /data/.secret_XXXXXX)
+    python3 -c "import secrets; print(secrets.token_hex(32), end='')" > "$SECRET_TMP"
+    chown claude:claude "$SECRET_TMP"
+    chmod 400 "$SECRET_TMP"
+    mv "$SECRET_TMP" /data/shared_secret
     echo "[claude_cli] Generated new shared secret"
+else
+    # Ensure correct ownership on existing secret
+    chown claude:claude /data/shared_secret
+    chmod 400 /data/shared_secret
 fi
 
 # Set up claude user's data directory and permissions
 mkdir -p /data/claude_environment/.claude/commands
 chown -R claude:claude /data/claude_environment
-chown claude:claude /data/shared_secret
-chmod 400 /data/shared_secret
-# options.json must be readable by the bridge (but not writable)
-chmod 644 /data/options.json 2>/dev/null || true
+# options.json: readable by bridge process via group, not world-readable
+chown root:claude /data/options.json 2>/dev/null || true
+chmod 640 /data/options.json 2>/dev/null || true
 
-# Start bridge as claude user with only necessary env vars
+# Start bridge as claude user with s6-envdir (env vars from files, not cmdline)
 exec s6-setuidgid claude env -i \
     HOME=/data \
     PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" \
@@ -182,6 +198,5 @@ exec s6-setuidgid claude env -i \
     DISABLE_AUTOUPDATER=1 \
     CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY=1 \
     CLAUDE_CODE_DISABLE_TERMINAL_TITLE=1 \
-    $TELEMETRY_OPTS \
-    $(cat /tmp/bridge_env 2>/dev/null | tr '\n' ' ') \
+    s6-envdir "$ENVDIR" \
     python3 -u /opt/bridge/server.py

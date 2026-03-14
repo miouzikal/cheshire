@@ -1,13 +1,4 @@
 # Claude Code SDK — Python wrapper for the Claude Code CLI
-# Handles subprocess lifecycle, JSON parsing, session management
 claude-code-sdk==0.0.25
-# JWT token generation for authentication
-PyJWT==2.12.1
-# Cryptography for secure token operations
-cryptography>=46.0.0
-
 # HTTP server for the bridge API
 aiohttp==3.11.18
-
-# Used by run.sh for JSON parsing (installed via apt)
-# jq is installed at the OS level, not via pip
