@@ -73,7 +73,10 @@ def _load_options() -> dict[str, str | int | bool]:
         Dictionary of addon configuration options.
     """
     if OPTIONS_PATH.exists():
-        return json.loads(OPTIONS_PATH.read_text())
+        try:
+            return json.loads(OPTIONS_PATH.read_text())
+        except json.JSONDecodeError as e:
+            logger.error("Failed to parse %s: %s", OPTIONS_PATH, e)
     return {}
 
 
@@ -102,16 +105,16 @@ def _get_cli_auth_status() -> CliAuthStatus:
         Authentication status with login state, method, email, and subscription.
     """
     try:
+        env = {
+            "HOME": os.environ.get("HOME", "/data"),
+            "PATH": os.environ.get("PATH", "/usr/local/bin:/usr/bin:/bin"),
+        }
         result = subprocess.run(
             ["claude", "auth", "status", "--json"],
             capture_output=True,
             text=True,
             timeout=10,
-            env={
-                key: value
-                for key, value in os.environ.items()
-                if key != "CLAUDECODE"
-            },
+            env=env,
         )
         if result.returncode == 0 and result.stdout.strip():
             return json.loads(result.stdout.strip())
@@ -307,12 +310,16 @@ class BridgeServer:
         Returns:
             JSON response with health status.
         """
-        auth_status = await asyncio.to_thread(_get_cli_auth_status)
-        cli_version = await asyncio.to_thread(_get_cli_version)
+        # Check if request is authenticated (set by security middleware)
+        is_authenticated = request.get("authenticated_request", False)
 
-        # Check if request is authenticated
-        authorization_header = request.headers.get("Authorization", "")
-        is_authenticated = authorization_header.startswith("Bearer ")
+        if not is_authenticated:
+            return web.json_response({"status": "ok"})
+
+        auth_status, cli_version = await asyncio.gather(
+            asyncio.to_thread(_get_cli_auth_status),
+            asyncio.to_thread(_get_cli_version),
+        )
 
         response = HealthResponse(
             addon_version=ADDON_VERSION,
@@ -357,6 +364,11 @@ class BridgeServer:
         if not converse_request.message_text.strip():
             return web.json_response(
                 {"error": "message_text is required"}, status=400
+            )
+
+        if len(converse_request.message_text) > 100_000:
+            return web.json_response(
+                {"error": "message_text too long"}, status=413
             )
 
         model = _resolve_model(converse_request.model_hint, self._options)
@@ -407,6 +419,11 @@ class BridgeServer:
         if not task_request.task_prompt.strip():
             return web.json_response(
                 {"error": "task_prompt is required"}, status=400
+            )
+
+        if len(task_request.task_prompt) > 100_000:
+            return web.json_response(
+                {"error": "task_prompt too long"}, status=413
             )
 
         model = _resolve_model(task_request.model_hint, self._options)
@@ -520,6 +537,7 @@ def create_application(shared_secret: str) -> web.Application:
         middlewares=[auth_middleware(shared_secret)],
         client_max_size=MAX_REQUEST_SIZE,
     )
+    application["shared_secret"] = shared_secret
 
     bridge = BridgeServer()
 

@@ -82,7 +82,7 @@ def _build_options(
         Configured ClaudeCodeOptions instance.
     """
     option_arguments: dict[str, str | int | bool | dict[str, str]] = {
-        "permission_mode": "bypassPermissions",
+        "permission_mode": "allowEdits",
     }
 
     if default_options.get("cwd"):
@@ -246,6 +246,8 @@ class SessionPool:
                 # Check capacity and evict LRU if needed
                 if len(self._sessions) >= self._max_sessions:
                     evicted_session = self._pop_least_recently_used()
+                    if evicted_session is None and len(self._sessions) >= self._max_sessions:
+                        raise RuntimeError("Session pool exhausted — all sessions in use")
 
         # Disconnect evicted client OUTSIDE lock
         if evicted_session is not None:
@@ -273,7 +275,8 @@ class SessionPool:
                     existing_session.in_use = True
                     managed_session = existing_session
                     # Disconnect the duplicate outside lock
-                    asyncio.create_task(self._safe_disconnect(new_managed_session))
+                    task = asyncio.create_task(self._safe_disconnect(new_managed_session))
+                    task.add_done_callback(lambda t: t.exception() if not t.cancelled() else None)
                     logger.debug(
                         "Session %s created by concurrent request, reusing",
                         session_id,
@@ -288,8 +291,10 @@ class SessionPool:
                 managed_session, prompt, timeout=timeout, start_time=start_time
             )
         finally:
-            managed_session.in_use = False
-            managed_session.touch()
+            async with self._lock:
+                if session_id in self._sessions:
+                    self._sessions[session_id].in_use = False
+                    self._sessions[session_id].touch()
 
     async def close_session(self, session_id: str) -> bool:
         """Explicitly close a session.
@@ -493,7 +498,7 @@ async def one_shot_query(
     start_time = time.monotonic()
 
     option_arguments: dict[str, str | int | bool | dict[str, str]] = {
-        "permission_mode": "bypassPermissions",
+        "permission_mode": "allowEdits",
     }
     if model:
         option_arguments["model"] = model

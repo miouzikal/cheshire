@@ -3,6 +3,16 @@
 profile claude_cli flags=(attach_disconnected,mediate_deleted) {
   #include <abstractions/base>
 
+  # Capabilities needed by sshd (privilege separation, user switching)
+  capability chown,
+  capability dac_override,
+  capability setgid,
+  capability setuid,
+  capability sys_chroot,
+  capability kill,
+  capability net_bind_service,
+  capability sys_admin,
+
   # S6 overlay init system and general binaries
   /init rix,
   /run.sh rix,
@@ -44,7 +54,12 @@ profile claude_cli flags=(attach_disconnected,mediate_deleted) {
   /data/** rwk,
 
   # Root home (SSH keys, shell config)
+  /root/ r,
   /root/** rwk,
+
+  # Claude user home directory
+  /home/claude/ r,
+  /home/claude/** rwk,
 
   # System configuration files (mime.types, resolv.conf, hosts, ssl certs, etc.)
   /etc/ r,
@@ -55,15 +70,34 @@ profile claude_cli flags=(attach_disconnected,mediate_deleted) {
   /run/sshd/ rw,
   /run/sshd/** rw,
 
+  # PTY and terminal devices (required for SSH interactive sessions)
+  /dev/ r,
+  /dev/pts/ rw,
+  /dev/pts/* rw,
+  /dev/ptmx rw,
+  /dev/tty rw,
+  /dev/tty* rw,
+  /dev/null rw,
+  /dev/zero r,
+  /dev/urandom r,
+  /dev/random r,
+
   # Temporary files
   /tmp/ r,
   /tmp/** rwk,
 
-  # Proc filesystem (required by Python and subprocess management)
+  # Proc filesystem (Python, subprocess management, sshd crypto)
+  @{PROC}/ r,
+  @{PROC}/@{pid}/ r,
   @{PROC}/@{pid}/fd/ r,
+  @{PROC}/@{pid}/fd/** rw,
   @{PROC}/@{pid}/stat r,
   @{PROC}/@{pid}/status r,
-  @{PROC}/sys/kernel/random/uuid r,
+  @{PROC}/@{pid}/maps r,
+  @{PROC}/@{pid}/mounts r,
+  @{PROC}/@{pid}/oom_score_adj rw,
+  @{PROC}/sys/kernel/random/** r,
+  @{PROC}/sys/crypto/** r,
 
   # Standard system libraries (need directory listing for Python module finder)
   /lib/ r,

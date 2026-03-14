@@ -33,6 +33,7 @@ RUN set -eux \
         "cryptography>=46.0.0" \
         aiohttp==3.11.18 \
     && python3 -c "import aiohttp; print(f'aiohttp {aiohttp.__version__} OK')" \
+    && useradd -r -m -d /home/claude -s /bin/bash -G tty claude \
     && echo "Build complete: version=${BUILD_VERSION} claude=${CLAUDE_CLI_VERSION}"
 
 # Copy bridge server code

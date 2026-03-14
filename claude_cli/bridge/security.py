@@ -31,48 +31,28 @@ def generate_shared_secret() -> str:
 
 
 def load_or_create_secret() -> str:
-    """Load existing shared secret or generate a new one.
+    """Load the shared secret created by run.sh at startup.
 
-    The secret is stored atomically (write to temp file, then rename)
-    with mode 0600 to prevent other processes from reading it.
+    The secret file is created by the entrypoint script (as root) before
+    the bridge starts as the claude user. This function only reads it.
 
     Returns:
         The shared secret as a hex string.
+
+    Raises:
+        FileNotFoundError: If the secret file does not exist.
     """
     if SECRET_FILE_PATH.exists():
         secret = SECRET_FILE_PATH.read_text().strip()
         if len(secret) >= SECRET_LENGTH_BYTES * 2:
-            logger.info("Loaded existing shared secret from %s", SECRET_FILE_PATH)
+            logger.info("Loaded shared secret")
             return secret
-        logger.warning("Existing secret is too short, regenerating")
 
-    secret = generate_shared_secret()
-
-    SECRET_FILE_PATH.parent.mkdir(parents=True, exist_ok=True)
-
-    file_descriptor = None
-    temp_path = None
-    try:
-        file_descriptor, temp_path = tempfile.mkstemp(
-            dir=str(SECRET_FILE_PATH.parent),
-            prefix=".secret_",
-        )
-        os.write(file_descriptor, secret.encode())
-        os.fchmod(file_descriptor, stat.S_IRUSR | stat.S_IWUSR)
-        os.close(file_descriptor)
-        file_descriptor = None
-        os.rename(temp_path, str(SECRET_FILE_PATH))
-        temp_path = None
-    finally:
-        if file_descriptor is not None:
-            os.close(file_descriptor)
-        if temp_path is not None and os.path.exists(temp_path):
-            os.unlink(temp_path)
-
-    logger.info("Generated new shared secret at %s", SECRET_FILE_PATH)
-    logger.info("To view it, run: cat %s", SECRET_FILE_PATH)
-
-    return secret
+    # Secret should have been created by run.sh — fatal if missing
+    raise FileNotFoundError(
+        f"Shared secret not found at {SECRET_FILE_PATH}. "
+        "The entrypoint script (run.sh) should create it before starting the bridge."
+    )
 
 
 def verify_token(provided_token: str, expected_secret: str) -> bool:
@@ -103,11 +83,16 @@ def auth_middleware(shared_secret: str) -> web.middleware:
         request: web.Request,
         handler: web.RequestHandler,
     ) -> web.StreamResponse:
-        # Allow unauthenticated access to /health for watchdog probes
-        if request.path == "/health":
-            return await handler(request)
-
         authorization = request.headers.get("Authorization", "")
+
+        # For /health, skip auth enforcement but flag whether authenticated
+        if request.path == "/health":
+            authenticated = False
+            if authorization.startswith("Bearer "):
+                token = authorization[7:]
+                authenticated = verify_token(token, shared_secret)
+            request["authenticated_request"] = authenticated
+            return await handler(request)
 
         if not authorization.startswith("Bearer "):
             logger.warning(
@@ -118,6 +103,7 @@ def auth_middleware(shared_secret: str) -> web.middleware:
             return web.json_response(
                 {"error": "Missing or invalid Authorization header"},
                 status=401,
+                headers={"WWW-Authenticate": "Bearer"},
             )
 
         token = authorization[7:]
@@ -131,8 +117,10 @@ def auth_middleware(shared_secret: str) -> web.middleware:
             return web.json_response(
                 {"error": "Invalid authentication token"},
                 status=401,
+                headers={"WWW-Authenticate": "Bearer"},
             )
 
+        request["authenticated_request"] = True
         return await handler(request)
 
     return middleware

@@ -39,13 +39,16 @@ export_if_set() {
     local key="$1"
     local var="$2"
     local val
-    # Use jq 'has' + 'tostring' to correctly handle 0, false, and empty strings
     val=$(jq -r "if has(\"${key}\") then .${key} | tostring else \"\" end" "$CONFIG_PATH" 2>/dev/null)
     if [ -n "$val" ]; then
-        export "$var"="$val"
+        echo "${var}=${val}" >> /tmp/bridge_env
         echo "[claude_cli] Set ${var}"
     fi
 }
+
+# Create clean env file for the bridge process
+: > /tmp/bridge_env
+chmod 600 /tmp/bridge_env
 
 export_if_set "anthropic_api_key" "ANTHROPIC_API_KEY"
 export_if_set "anthropic_base_url" "ANTHROPIC_BASE_URL"
@@ -54,12 +57,10 @@ export_if_set "anthropic_custom_headers" "ANTHROPIC_CUSTOM_HEADERS"
 export_if_set "max_output_tokens" "CLAUDE_CODE_MAX_OUTPUT_TOKENS"
 export_if_set "max_thinking_tokens" "MAX_THINKING_TOKENS"
 
-# Handle disable_telemetry toggle (already set to 1 in Dockerfile,
-# but user can override to false)
+TELEMETRY_OPTS="DISABLE_TELEMETRY=1 CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1"
 telemetry_disabled=$(jq -r '.disable_telemetry // true' "$CONFIG_PATH" 2>/dev/null)
 if [ "$telemetry_disabled" = "false" ]; then
-    unset CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC
-    unset DISABLE_TELEMETRY
+    TELEMETRY_OPTS=""
     echo "[claude_cli] Telemetry enabled by user configuration"
 fi
 
@@ -67,7 +68,15 @@ fi
 # Configure and start SSH daemon (key-only authentication)
 # ----------------------------------------------------------------------------
 setup_ssh() {
-    local ssh_dir="/root/.ssh"
+    # Mount a fresh devpts instance so sshd can allocate PTYs
+    # (HA Supervisor mounts /dev read-only with ptmxmode=000)
+    if mount -t devpts devpts /dev/pts -o newinstance,ptmxmode=0666,mode=620,gid=5 2>/dev/null; then
+        echo "[claude_cli] Mounted fresh devpts for PTY allocation"
+    elif chmod 666 /dev/pts/ptmx 2>/dev/null; then
+        echo "[claude_cli] Fixed /dev/pts/ptmx permissions (fallback)"
+    fi
+
+    local ssh_dir="/home/claude/.ssh"
     local auth_keys="${ssh_dir}/authorized_keys"
     local sshd_config="/etc/ssh/sshd_config"
 
@@ -82,6 +91,7 @@ setup_ssh() {
     # Write authorized keys from addon config
     jq -r '.ssh_authorized_keys[]? // empty' "$CONFIG_PATH" > "$auth_keys" 2>/dev/null
     chmod 600 "$auth_keys"
+    chown -R claude:claude "$ssh_dir"
 
     local key_count
     key_count=$(wc -l < "$auth_keys" | tr -d ' ')
@@ -108,7 +118,8 @@ setup_ssh() {
 Port 22
 HostKey ${host_key_dir}/ssh_host_rsa_key
 HostKey ${host_key_dir}/ssh_host_ed25519_key
-PermitRootLogin prohibit-password
+PermitRootLogin no
+AllowUsers claude
 PasswordAuthentication no
 ChallengeResponseAuthentication no
 KbdInteractiveAuthentication no
@@ -116,7 +127,6 @@ UsePAM no
 AuthorizedKeysFile ${auth_keys}
 PrintMotd yes
 AcceptEnv LANG LC_*
-Subsystem sftp /usr/lib/openssh/sftp-server
 # Hardening
 MaxAuthTries 3
 MaxSessions 3
@@ -148,4 +158,30 @@ echo "[claude_cli] Bridge server starting on port 8099"
 # Start the Python bridge server
 # -u: unbuffered stdout/stderr for real-time log output
 # ----------------------------------------------------------------------------
-exec python3 -u /opt/bridge/server.py
+
+# Generate shared secret as root (claude user can't write to /data/)
+if [ ! -f /data/shared_secret ] || [ ! -s /data/shared_secret ]; then
+    python3 -c "import secrets; print(secrets.token_hex(32), end='')" > /data/shared_secret
+    chmod 600 /data/shared_secret
+    echo "[claude_cli] Generated new shared secret"
+fi
+
+# Set up claude user's data directory and permissions
+mkdir -p /data/claude_environment/.claude/commands
+chown -R claude:claude /data/claude_environment
+chown claude:claude /data/shared_secret
+chmod 400 /data/shared_secret
+# options.json must be readable by the bridge (but not writable)
+chmod 644 /data/options.json 2>/dev/null || true
+
+# Start bridge as claude user with only necessary env vars
+exec s6-setuidgid claude env -i \
+    HOME=/data \
+    PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" \
+    ADDON_VERSION="${ADDON_VERSION}" \
+    DISABLE_AUTOUPDATER=1 \
+    CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY=1 \
+    CLAUDE_CODE_DISABLE_TERMINAL_TITLE=1 \
+    $TELEMETRY_OPTS \
+    $(cat /tmp/bridge_env 2>/dev/null | tr '\n' ' ') \
+    python3 -u /opt/bridge/server.py
