@@ -3,119 +3,364 @@
 profile claude_cli flags=(attach_disconnected,mediate_deleted) {
   #include <abstractions/base>
 
-  # Capabilities needed for init (root) and sshd (privilege separation)
+  # ==========================================================================
+  # CAPABILITIES
+  # ==========================================================================
+
+  # sshd: change ownership of SSH host keys, authorized_keys, user dirs
   capability chown,
+
+  # sshd: read/write files regardless of POSIX permissions (privilege separation)
   capability dac_override,
+
+  # sshd/s6: switch group identity when forking child processes
   capability setgid,
+
+  # sshd/s6-setuidgid: switch user identity (root -> claude)
   capability setuid,
+
+  # sshd: privilege separation uses chroot for unprivileged pre-auth child
   capability sys_chroot,
+
+  # s6/sshd: send signals to child processes for lifecycle management
   capability kill,
+
+  # sshd: bind to port 22 (privileged port < 1024)
   capability net_bind_service,
-  # sys_admin: required for `mount -t devpts` in run.sh to allocate PTYs
-  # for SSH sessions. HA Supervisor mounts /dev read-only with ptmxmode=000.
+
+  # run.sh: mount devpts filesystem for PTY allocation in container.
+  # HA Supervisor mounts /dev read-only with ptmxmode=000.
   # Only used during init before privileges are dropped to claude user.
   capability sys_admin,
 
-  # S6 overlay init system and general binaries
-  /init rix,
-  /run.sh rix,
-  /package/** rix,
-  /command/** rix,
-  /bin/** rix,
-  /usr/bin/** rix,
-  /usr/sbin/** rix,
-  /etc/s6-overlay/** r,
-  /run/** rwkix,
 
-  # Network access for bridge API server and Claude API calls
+  # ==========================================================================
+  # NETWORK
+  # ==========================================================================
+
+  # Bridge API server (port 8099) and outbound HTTPS to Anthropic API
   network inet stream,
   network inet6 stream,
+
+  # DNS resolution (required for API endpoint lookups)
   network inet dgram,
   network inet6 dgram,
 
-  # Python interpreter and bridge server
+
+  # ==========================================================================
+  # S6 OVERLAY INIT SYSTEM
+  # ==========================================================================
+
+  # S6 overlay PID 1 init binary
+  /init rix,
+
+  # Addon entrypoint script
+  /run.sh rix,
+
+  # S6 overlay package binaries (s6-svc, s6-supervise, s6-setuidgid, etc.)
+  /package/** rix,
+  /command/** rix,
+
+  # S6 overlay configuration (service definitions, run scripts)
+  /etc/s6-overlay/** r,
+
+  # S6 runtime state (service status, supervision tree, fifo dirs)
+  /run/** rwkix,
+
+
+  # ==========================================================================
+  # SHELL AND SYSTEM BINARIES
+  # ==========================================================================
+
+  # System shells and utilities (bash, grep, sed, jq, mount, chmod, etc.)
+  # Required by run.sh, Claude CLI Bash tool, and sshd
+  /bin/** rix,
+  /usr/bin/** rix,
+  /usr/sbin/** rix,
+
+
+  # ==========================================================================
+  # PYTHON INTERPRETER AND BRIDGE SERVER
+  # ==========================================================================
+
+  # Python 3 interpreter (runs the bridge server)
   /usr/bin/python3* ix,
+
+  # Python standard library and installed packages
   /usr/lib/python3/** r,
   /usr/lib/python3/dist-packages/** r,
 
-  # Claude CLI binary and locally installed tools (pip3, etc.)
-  /usr/local/bin/ r,
-  /usr/local/bin/** rix,
-  /opt/claude/** r,
-  /opt/claude/.local/bin/claude ix,
-
-  # Bridge server code (directory listing + file read)
+  # Bridge server code (read-only, mounted into container)
   /opt/ r,
   /opt/bridge/ r,
   /opt/bridge/** r,
+
+  # Default environment files copied on first run (read-only source)
   /opt/defaults/ r,
   /opt/defaults/** r,
+
+  # Addon config.yaml (read version string at startup)
   /opt/config.yaml r,
 
-  # Persistent data directory (auth, config, sessions, environment)
+
+  # ==========================================================================
+  # CLAUDE CLI BINARY AND LOCALLY INSTALLED TOOLS
+  # ==========================================================================
+
+  # Directory listing for PATH resolution
+  /usr/local/bin/ r,
+
+  # Claude CLI binary and pip-installed tools
+  /usr/local/bin/** rix,
+
+  # Claude CLI support files (bundled resources, if any)
+  /opt/claude/** r,
+  /opt/claude/.local/bin/claude ix,
+
+
+  # ==========================================================================
+  # /data/ — PERSISTENT ADDON DATA (fine-grained access)
+  # ==========================================================================
+
+  # Directory listing on /data/ itself
   /data/ r,
-  /data/** rwk,
 
-  # Root home (SSH keys, shell config)
-  /root/ r,
-  /root/** rwk,
+  # --- Read-only paths ---
 
-  # Claude user home directory
+  # Addon options (API keys, SSH keys, model config) — written by HA Supervisor,
+  # read by run.sh and bridge. Must not be writable by the addon.
+  /data/options.json r,
+
+  # Shared secret for bridge authentication — generated by run.sh on first start,
+  # then read-only. File permissions (0400) enforce read-only after creation.
+  /data/shared_secret rw,
+  # Temp file for atomic secret creation (mktemp /data/.secret_XXXXXX)
+  /data/.secret_* rw,
+
+  # --- Read-write paths ---
+
+  # Claude's working directory: all user files, CLAUDE.md, .claude/ settings.
+  # This is the only directory Claude CLI should read/write user content in.
+  /data/claude_environment/ r,
+  /data/claude_environment/** rwk,
+
+  # SSH host keys — generated on first run, read on subsequent starts
+  /data/.ssh_host_keys/ r,
+  /data/.ssh_host_keys/** rwk,
+
+  # HOME=/data for Claude CLI — auth tokens, session state, config
+  /data/.claude/ rw,
+  /data/.claude/** rwk,
+
+  # Claude CLI dotfiles under HOME=/data
+  /data/.anthropic/ rw,
+  /data/.anthropic/** rwk,
+  /data/.config/ rw,
+  /data/.config/** rwk,
+  /data/.cache/ rw,
+  /data/.cache/** rwk,
+  /data/.local/ rw,
+  /data/.local/** rwk,
+
+
+  # ==========================================================================
+  # USER HOME DIRECTORIES
+  # ==========================================================================
+
+  # Claude user home — SSH authorized_keys and shell profile
   /home/claude/ r,
   /home/claude/** rwk,
 
-  # System configuration files (mime.types, resolv.conf, hosts, ssl certs, etc.)
+
+  # ==========================================================================
+  # SYSTEM CONFIGURATION (read-only, explicit allowlist)
+  # ==========================================================================
+
+  # Directory listing
   /etc/ r,
-  /etc/** r,
+
+  # DNS resolution and network config
+  /etc/resolv.conf r,
+  /etc/hosts r,
+  /etc/host.conf r,
+  /etc/nsswitch.conf r,
+  /etc/gai.conf r,
+
+  # User/group database (sshd, s6-setuidgid, id, whoami)
+  /etc/passwd r,
+  /etc/group r,
+  /etc/shadow r,
+
+  # SSL/TLS certificates (outbound HTTPS to Anthropic API)
+  /etc/ssl/ r,
+  /etc/ssl/** r,
+  /etc/ca-certificates/ r,
+  /etc/ca-certificates/** r,
+
+  # Login and shell configuration
+  /etc/login.defs r,
+  /etc/shells r,
+  /etc/profile r,
+  /etc/profile.d/ r,
+  /etc/profile.d/** r,
+  /etc/bash.bashrc r,
+  /etc/environment r,
+  /etc/default/ r,
+  /etc/default/** r,
+
+  # MIME types (Python, HTTP content-type detection)
+  /etc/mime.types r,
+
+  # Timezone
+  /etc/localtime r,
+  /etc/timezone r,
+
+  # Security limits (sshd)
+  /etc/security/ r,
+  /etc/security/** r,
+  /etc/pam.d/ r,
+  /etc/pam.d/** r,
+
+  # SSH daemon configuration (sshd_config is rewritten by run.sh)
+  /etc/ssh/ r,
   /etc/ssh/** rw,
 
-  # SSH daemon
+  # Terminfo/termcap (interactive SSH sessions, Claude CLI TUI)
+  /etc/terminfo/ r,
+  /etc/terminfo/** r,
+
+  # Dynamic linker (needed for binary execution)
+  /etc/ld.so.cache r,
+  /etc/ld.so.conf r,
+  /etc/ld.so.conf.d/ r,
+  /etc/ld.so.conf.d/** r,
+
+  # Python configuration
+  /etc/python3/ r,
+  /etc/python3/** r,
+
+
+  # ==========================================================================
+  # SSH DAEMON
+  # ==========================================================================
+
+  # sshd runtime directory (PID file, privilege separation)
   /run/sshd/ rw,
   /run/sshd/** rw,
 
-  # PTY and terminal devices (required for SSH interactive sessions)
+
+  # ==========================================================================
+  # PTY AND TERMINAL DEVICES
+  # ==========================================================================
+
+  # Device directory listing
   /dev/ r,
+
+  # PTY allocation (SSH interactive sessions, subprocess terminals)
   /dev/pts/ rw,
   /dev/pts/* rw,
   /dev/ptmx rw,
   /dev/tty rw,
   /dev/tty* rw,
+
+  # Standard I/O devices
   /dev/null rw,
   /dev/zero r,
+
+  # Cryptographic randomness (SSH key generation, Python secrets, API nonces)
   /dev/urandom r,
   /dev/random r,
 
-  # Temporary files
+
+  # ==========================================================================
+  # TEMPORARY FILES
+  # ==========================================================================
+
+  # Python tempfile, pip, subprocess communication, s6-envdir
   /tmp/ r,
   /tmp/** rwk,
 
-  # Proc filesystem (Python, subprocess management, sshd crypto)
+
+  # ==========================================================================
+  # PROC FILESYSTEM
+  # ==========================================================================
+
+  # Process listing (Python subprocess management, s6 supervision)
   @{PROC}/ r,
   @{PROC}/@{pid}/ r,
+
+  # File descriptor management (subprocess I/O redirection, pipe management)
   @{PROC}/@{pid}/fd/ r,
   @{PROC}/@{pid}/fd/** rw,
+
+  # Process status info (subprocess health checks, resource monitoring)
   @{PROC}/@{pid}/stat r,
   @{PROC}/@{pid}/status r,
+
+  # Memory maps (Python ctypes, native binary loader, mmap)
   @{PROC}/@{pid}/maps r,
+
+  # Mount info (devpts mount check in run.sh)
   @{PROC}/@{pid}/mounts r,
+
+  # OOM score adjustment (sshd adjusts for child processes)
   @{PROC}/@{pid}/oom_score_adj rw,
+
+  # Kernel random entropy info (SSH key generation quality checks)
   @{PROC}/sys/kernel/random/** r,
+
+  # Crypto algorithm availability (sshd cipher negotiation)
   @{PROC}/sys/crypto/** r,
 
-  # Standard system libraries (need directory listing for Python module finder)
+
+  # ==========================================================================
+  # SYSTEM LIBRARIES
+  # ==========================================================================
+
+  # Shared libraries — read and mmap (rm) for dynamic linking
   /lib/ r,
   /lib/** rm,
   /usr/lib/ r,
   /usr/lib/** rm,
+
+  # Locally installed libraries (pip packages with native extensions)
   /usr/local/ r,
   /usr/local/lib/ r,
   /usr/local/lib/** rm,
+
+  # Shared data files (timezone data, locale, terminfo, mime)
   /usr/share/ r,
   /usr/share/** r,
 
-  # Deny dangerous operations
+
+  # ==========================================================================
+  # DENY RULES — explicit blocks on dangerous operations
+  # ==========================================================================
+
+  # Prevent container escape via core_pattern (CVE-2019-5736 class)
   deny /proc/sys/kernel/core_pattern w,
+
+  # Block sysfs writes (device/driver manipulation, cgroup escape)
   deny /sys/** w,
+
+  # Boot partition has no business being accessed from an addon
   deny /boot/** rwx,
-  deny /root/.bash_history rw,
+
+  # options.json: writable by HA Supervisor only. File permissions (root:claude 0640)
+  # enforce this; AppArmor can't distinguish init-phase root from runtime claude user.
+  # deny /data/options.json w,  -- not feasible (single profile for both phases)
+
+  # Prevent modification of system binaries
+  deny /bin/** w,
+  deny /usr/bin/** w,
+  deny /usr/sbin/** w,
+  deny /usr/local/bin/** w,
+
+  # Prevent modification of bridge server code
+  deny /opt/bridge/** w,
+  deny /opt/defaults/** w,
+
+  # Block access to root home entirely — addon uses claude user, not root
+  deny /root/ rwx,
+  deny /root/** rwx,
 }
