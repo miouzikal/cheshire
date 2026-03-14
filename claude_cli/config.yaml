@@ -25,10 +25,6 @@ options:
   fast_model: "claude-haiku-4-5"
   default_model: "claude-sonnet-4-6"
   smart_model: "claude-opus-4-6"
-  anthropic_api_key: ""
-  anthropic_base_url: ""
-  anthropic_model: ""
-  anthropic_custom_headers: ""
   max_output_tokens: 32000
   max_thinking_tokens: 0
   disable_telemetry: true
