@@ -14,15 +14,12 @@ COPY requirements.txt /tmp/requirements.txt
 RUN set -eux \
     && apt-get update \
     && apt-get install -y --no-install-recommends \
-        curl \
-        ca-certificates \
+        bash \
         git \
-        jq \
         openssh-server \
         python3 \
         python3-pip \
     && rm -rf /var/lib/apt/lists/* \
-    && mkdir -p /run/sshd \
     && CLAUDE_PLATFORM="linux-x64" \
     && if [ "${BUILD_ARCH}" = "aarch64" ]; then CLAUDE_PLATFORM="linux-arm64"; fi \
     && curl -fsSL -o /usr/local/bin/claude \
@@ -33,7 +30,11 @@ RUN set -eux \
     && pip3 install --no-cache-dir --break-system-packages \
         -r /tmp/requirements.txt \
     && python3 -c "import aiohttp; print(f'aiohttp {aiohttp.__version__} OK')" \
-    && useradd -r -m -d /home/claude -s /bin/bash -G tty claude \
+    && groupadd -r claude \
+    && useradd -r -d /home/claude -m -s /bin/bash -g claude claude \
+    && usermod -p '*' claude \
+    && mkdir -p /run/sshd \
+    && rm -f /tmp/requirements.txt \
     && echo "Build complete: version=${BUILD_VERSION} claude=${CLAUDE_CLI_VERSION}"
 
 # Copy bridge server code

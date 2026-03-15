@@ -91,7 +91,7 @@ Public SSH keys allowed to connect to the addon container. Used for CLI authenti
 The addon's working directory is `/data/claude_environment/`. You can customize Claude's behavior by editing these files via SSH:
 
 - **`CLAUDE.md`** — System prompt and instructions. This is loaded as context for every conversation.
-- **`.claude/settings.json`** — Tool permissions (allow/deny lists). The bridge uses `allowEdits` permission mode, which respects the deny list in settings.json.
+- **`.claude/settings.json`** — Tool permissions (allow/deny lists). The bridge uses `allowEdits` permission mode, which respects the deny list in settings.json. This file is write-protected at runtime to prevent Claude from modifying its own restrictions. To edit, use the HA File Editor addon, Samba addon, or VS Code addon, then restart.
 - **`mcp.json`** — MCP server configuration for extending Claude's capabilities.
 - **`.claude/commands/`** — Custom slash commands (Markdown files with YAML frontmatter).
 
@@ -126,12 +126,17 @@ Authentication uses Bearer token: `Authorization: Bearer <shared_secret>`
 
 ## Security
 
+**Security rating: 5/6** (AppArmor enabled, single low-risk capability).
+
+- **Debian bookworm container**: Official HA Debian base image. Only `AUDIT_WRITE` capability (required by Debian's OpenSSH for audit logging — without it, sshd calls `fatal()` on PTY allocation).
 - **Unprivileged execution**: The bridge server runs as the `claude` user (not root), started via `s6-setuidgid`.
-- **Secret management**: The shared secret (64-character hex) is generated atomically (mktemp + mv) with owner-read-only permissions (mode 0400), owned by `claude:claude`. Environment variables are injected via s6-envdir (file-based), so secrets never appear in process command lines.
-- **SSH access**: Key-only authentication, runs as `claude` user (`PermitRootLogin no`, `AllowUsers claude`). PTY allocation uses a fresh devpts mount. Hardened config: no password auth, no tunneling, no forwarding, max 3 auth attempts, 30s login grace time.
-- **AppArmor**: Custom profile with deny rules for `/proc/sys/kernel/core_pattern`, `/sys/**`, `/boot/**`, and `/root/.bash_history`.
+- **Secret management**: The shared secret (64-character hex) is generated atomically with owner-read-only permissions, owned by `claude:claude`. Environment variables are injected via s6-envdir (file-based), so secrets never appear in process command lines.
+- **SSH access**: Key-only authentication, runs as `claude` user (`PermitRootLogin no`, `AllowUsers claude`). Hardened config: no password auth, no tunneling, no forwarding, max 3 auth attempts, 30s login grace time.
+- **AppArmor**: Custom profile with fine-grained rules. Explicit deny rules for system binaries (`/bin/**`, `/usr/bin/**`), critical config files (`/etc/passwd`, `/etc/shadow`, `/etc/resolv.conf`), container escape vectors (`/proc/sys/kernel/core_pattern`, `/sys/**`), and root home (`/root/**`).
+- **Health monitoring**: The `/health` endpoint probes sshd on port 22. If sshd is dead, returns HTTP 503, triggering the HA watchdog to restart the addon automatically.
 - **Rate limiting**: 60 requests/minute per IP on `/converse` and `/task` endpoints.
-- **Permission mode**: `allowEdits` — the Claude CLI respects the deny list defined in `.claude/settings.json`.
+- **Permission mode**: `allowEdits` — the Claude CLI respects the deny list defined in `.claude/settings.json`. The settings file is write-protected (`root:claude 440` + AppArmor deny) to prevent Claude Code from editing its own restrictions.
+- **Bridge network**: The bridge binds to `0.0.0.0:8099` (required for HA addon networking). The port is not published to the host by default (`null` mapping). Authentication via shared secret protects against unauthorized access from the Docker network.
 - **Dependencies**: Only `claude-code-sdk` and `aiohttp` (no PyJWT, no cryptography library).
 
 ## SSH
@@ -145,6 +150,8 @@ ssh claude@homeassistant -p 2222
 Requirements:
 - At least one SSH public key configured in the addon options.
 - Key format: `ssh-ed25519 AAAA...` or `ssh-rsa AAAA...`.
+
+Note: The container runs Debian bookworm. Use `apt-get` if you need to install additional packages inside the container.
 
 Host keys are persisted at `/data/.ssh_host_keys/` across restarts.
 

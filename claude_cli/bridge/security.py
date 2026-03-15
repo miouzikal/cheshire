@@ -1,16 +1,12 @@
 """Security utilities for the bridge server.
 
-Handles shared secret generation, storage, and request authentication.
+Handles shared secret loading and request authentication.
 """
 
 from __future__ import annotations
 
 import hmac
 import logging
-import os
-import secrets
-import stat
-import tempfile
 import time
 from collections import defaultdict
 from pathlib import Path
@@ -23,16 +19,7 @@ SECRET_FILE_PATH = Path("/data/shared_secret")
 SECRET_LENGTH_BYTES = 32
 
 
-def generate_shared_secret() -> str:
-    """Generate a cryptographically random shared secret.
-
-    Returns:
-        Hex-encoded string of SECRET_LENGTH_BYTES random bytes.
-    """
-    return secrets.token_hex(SECRET_LENGTH_BYTES)
-
-
-def load_or_create_secret() -> str:
+def load_shared_secret() -> str:
     """Load the shared secret created by run.sh at startup.
 
     The secret file is created by the entrypoint script (as root) before
@@ -45,7 +32,7 @@ def load_or_create_secret() -> str:
         FileNotFoundError: If the secret file does not exist.
     """
     if SECRET_FILE_PATH.exists():
-        secret = SECRET_FILE_PATH.read_text().strip()
+        secret = SECRET_FILE_PATH.read_text(encoding="utf-8").strip()
         if len(secret) >= SECRET_LENGTH_BYTES * 2:
             logger.info("Loaded shared secret")
             return secret
@@ -131,6 +118,7 @@ def auth_middleware(shared_secret: str) -> web.middleware:
 # Maximum requests per minute per remote address
 RATE_LIMIT_RPM = 60
 RATE_LIMIT_WINDOW = 60  # seconds
+RATE_LIMIT_MAX_IPS = 10_000  # cap tracked IPs to prevent memory exhaustion
 
 
 def rate_limit_middleware() -> web.middleware:
@@ -155,17 +143,21 @@ def rate_limit_middleware() -> web.middleware:
 
         remote = request.remote or "unknown"
         now = time.monotonic()
-        timestamps = request_log[remote]
 
         # Prune old entries outside the window
         cutoff = now - RATE_LIMIT_WINDOW
-        request_log[remote] = [t for t in timestamps if t > cutoff]
-        timestamps = request_log[remote]
+        timestamps = [t for t in request_log[remote] if t > cutoff]
 
-        # Remove empty entries to prevent unbounded dict growth
+        # Clean up stale IPs to prevent unbounded memory growth
         if not timestamps:
-            del request_log[remote]
-            timestamps = request_log[remote]  # re-creates via defaultdict
+            request_log.pop(remote, None)
+        else:
+            request_log[remote] = timestamps
+
+        # Evict oldest entries if too many IPs are tracked (DoS protection)
+        if len(request_log) > RATE_LIMIT_MAX_IPS:
+            oldest_ip = min(request_log, key=lambda ip: request_log[ip][0] if request_log[ip] else 0)
+            request_log.pop(oldest_ip, None)
 
         if len(timestamps) >= RATE_LIMIT_RPM:
             logger.warning("Rate limit exceeded for %s", remote)
@@ -175,7 +167,7 @@ def rate_limit_middleware() -> web.middleware:
                 headers={"Retry-After": str(RATE_LIMIT_WINDOW)},
             )
 
-        timestamps.append(now)
+        request_log[remote].append(now)
         return await handler(request)
 
     return middleware

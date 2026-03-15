@@ -11,6 +11,8 @@ import hashlib
 import json
 import logging
 import os
+import re
+import socket
 import subprocess
 import sys
 from dataclasses import asdict
@@ -35,11 +37,11 @@ from models import (
     TaskRequest,
     TaskResponse,
 )
-from security import auth_middleware, load_or_create_secret, rate_limit_middleware
+from security import auth_middleware, load_shared_secret, rate_limit_middleware
 
 logger = logging.getLogger(__name__)
 
-ADDON_VERSION = os.environ.get("ADDON_VERSION", "0.1.0")
+ADDON_VERSION = os.environ.get("ADDON_VERSION", "unknown")
 MAX_REQUEST_SIZE = 512 * 1024  # 512KB
 ENVIRONMENT_DIR = Path("/data/claude_environment")
 OPTIONS_PATH = Path("/data/options.json")
@@ -55,6 +57,25 @@ SAFE_OPTION_KEYS = frozenset({
     "max_tool_iterations",
     "log_level",
 })
+
+VALID_LOG_LEVELS = frozenset({"DEBUG", "INFO", "WARNING", "ERROR"})
+
+# UUID v4 pattern for session ID validation
+_SESSION_ID_RE = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
+
+# Model name validation: alphanumeric, dots, hyphens, underscores
+_MODEL_NAME_RE = re.compile(r"^[a-zA-Z0-9._-]{1,64}$")
+
+_CLI_ENV: dict[str, str] = {
+    "HOME": os.environ.get("HOME", "/data"),
+    "PATH": os.environ.get("PATH", "/usr/local/bin:/usr/bin:/bin"),
+    "DISABLE_AUTOUPDATER": "1",
+}
+
+# Pass through API key if set (needed for `claude auth status` to detect API key auth)
+_api_key = os.environ.get("ANTHROPIC_API_KEY")
+if _api_key:
+    _CLI_ENV["ANTHROPIC_API_KEY"] = _api_key
 
 
 class CliAuthStatus(TypedDict):
@@ -74,7 +95,7 @@ def _load_options() -> dict[str, str | int | bool]:
     """
     if OPTIONS_PATH.exists():
         try:
-            return json.loads(OPTIONS_PATH.read_text())
+            return json.loads(OPTIONS_PATH.read_text(encoding="utf-8"))
         except json.JSONDecodeError as e:
             logger.error("Failed to parse %s: %s", OPTIONS_PATH, e)
     return {}
@@ -105,16 +126,13 @@ def _get_cli_auth_status() -> CliAuthStatus:
         Authentication status with login state, method, email, and subscription.
     """
     try:
-        env = {
-            "HOME": os.environ.get("HOME", "/data"),
-            "PATH": os.environ.get("PATH", "/usr/local/bin:/usr/bin:/bin"),
-        }
         result = subprocess.run(
             ["claude", "auth", "status", "--json"],
             capture_output=True,
             text=True,
             timeout=10,
-            env=env,
+            encoding="utf-8",
+            env=_CLI_ENV,
         )
         if result.returncode == 0 and result.stdout.strip():
             return json.loads(result.stdout.strip())
@@ -140,10 +158,8 @@ def _get_cli_version() -> str:
             capture_output=True,
             text=True,
             timeout=5,
-            env={
-                "HOME": os.environ.get("HOME", "/data"),
-                "PATH": os.environ.get("PATH", "/usr/local/bin:/usr/bin:/bin"),
-            },
+            encoding="utf-8",
+            env=_CLI_ENV,
         )
         if result.returncode == 0:
             return result.stdout.strip().split("\n")[0]
@@ -155,6 +171,8 @@ def _get_cli_version() -> str:
 def _compute_file_hash(file_path: Path) -> str:
     """Compute SHA-256 hash of a file, or return empty string if not found.
 
+    Reads in chunks to avoid unbounded memory allocation.
+
     Args:
         file_path: Path to the file to hash.
 
@@ -163,8 +181,11 @@ def _compute_file_hash(file_path: Path) -> str:
     """
     if not file_path.exists():
         return ""
-    content = file_path.read_bytes()
-    return hashlib.sha256(content).hexdigest()[:16]
+    digest = hashlib.sha256()
+    with file_path.open("rb") as f:
+        for chunk in iter(lambda: f.read(8192), b""):
+            digest.update(chunk)
+    return digest.hexdigest()[:16]
 
 
 def _list_commands() -> list[str]:
@@ -193,7 +214,7 @@ def _read_mcp_config() -> list[McpServerInfo]:
     if not mcp_path.exists():
         return []
     try:
-        config = json.loads(mcp_path.read_text())
+        config = json.loads(mcp_path.read_text(encoding="utf-8"))
         servers = config.get("mcpServers", {})
         return [
             McpServerInfo(name=server_name, status="configured")
@@ -211,18 +232,33 @@ def _read_permissions() -> PermissionsSummary:
     """
     settings_path = ENVIRONMENT_DIR / ".claude" / "settings.json"
     if not settings_path.exists():
-        return PermissionsSummary()
+        return PermissionsSummary(allow=[], deny=[])
     try:
-        raw = json.loads(settings_path.read_text()).get("permissions", {})
+        raw = json.loads(settings_path.read_text(encoding="utf-8")).get("permissions", {})
         return PermissionsSummary(
             allow=raw.get("allow", []),
             deny=raw.get("deny", []),
         )
     except (json.JSONDecodeError, AttributeError):
-        return PermissionsSummary()
+        return PermissionsSummary(allow=[], deny=[])
+
+
+def _check_sshd() -> bool:
+    """Check if sshd is reachable by probing TCP port 22.
+
+    Returns:
+        True if sshd accepts connections, False otherwise.
+    """
+    try:
+        with socket.create_connection(("127.0.0.1", 22), timeout=2):
+            return True
+    except (OSError, TimeoutError):
+        return False
 
 
 VALID_MODEL_HINTS = frozenset({"auto", "fast", "default", "smart"})
+
+_MODEL_TIER_MAP = {"fast": "fast_model", "default": "default_model", "smart": "smart_model"}
 
 
 def _resolve_model(
@@ -241,15 +277,22 @@ def _resolve_model(
     Returns:
         Resolved model identifier string.
     """
+    default_model = str(options.get("default_model", "claude-sonnet-4-6"))
     if not model_hint or model_hint == "auto":
-        return str(options.get("default_model", "claude-sonnet-4-6"))
+        return default_model
     if model_hint not in VALID_MODEL_HINTS:
         logger.warning(
             "Unknown model hint '%s', falling back to default", model_hint
         )
-        return str(options.get("default_model", "claude-sonnet-4-6"))
-    models = _get_configured_models(options)
-    return models.get(model_hint, str(options.get("default_model", "claude-sonnet-4-6")))
+        return default_model
+    option_key = _MODEL_TIER_MAP.get(model_hint)
+    if option_key:
+        resolved = str(options.get(option_key, default_model))
+        if not _MODEL_NAME_RE.match(resolved):
+            logger.warning("Invalid model name '%s', falling back to default", resolved)
+            return default_model
+        return resolved
+    return default_model
 
 
 def _build_pool_options(
@@ -271,6 +314,23 @@ def _build_pool_options(
     if mcp_path.exists():
         pool_options["mcp_config"] = str(mcp_path)
     return pool_options
+
+
+def _validate_session_id(session_id: str | None) -> str | None:
+    """Validate that a session ID matches UUID v4 format.
+
+    Args:
+        session_id: The session ID from the request, or None.
+
+    Returns:
+        The validated session ID, or None if invalid/missing.
+    """
+    if session_id is None:
+        return None
+    if not isinstance(session_id, str) or not _SESSION_ID_RE.match(session_id):
+        logger.warning("Invalid session_id format, ignoring: %s", session_id[:50])
+        return None
+    return session_id
 
 
 class BridgeServer:
@@ -316,7 +376,17 @@ class BridgeServer:
         # Check if request is authenticated (set by security middleware)
         is_authenticated = request.get("authenticated_request", False)
 
+        sshd_alive = await asyncio.to_thread(_check_sshd)
+
         if not is_authenticated:
+            # Only report degraded if SSH keys were configured (sshd expected)
+            ssh_keys = self._options.get("ssh_authorized_keys", [])
+            sshd_expected = isinstance(ssh_keys, list) and len(ssh_keys) > 0
+            if sshd_expected and not sshd_alive:
+                return web.json_response(
+                    {"status": "degraded", "sshd": "dead"},
+                    status=503,
+                )
             return web.json_response({"status": "ok"})
 
         auth_status, cli_version = await asyncio.gather(
@@ -329,17 +399,15 @@ class BridgeServer:
             cli_version=cli_version,
             authenticated=auth_status.get("loggedIn", False),
             auth_method=auth_status.get("authMethod", "unknown"),
-            # Strip sensitive fields from unauthenticated requests
-            email=auth_status.get("email", "") if is_authenticated else "",
-            subscription_type=(
-                auth_status.get("subscriptionType", "") if is_authenticated else ""
-            ),
+            email=auth_status.get("email", ""),
+            subscription_type=auth_status.get("subscriptionType", ""),
             active_sessions=self._session_pool.active_session_count,
             configured_models=_get_configured_models(self._options),
             mcp_servers=_read_mcp_config(),
             request_timeout_seconds=int(
                 self._options.get("request_timeout_seconds", 120)
             ),
+            sshd=("running" if sshd_alive else "dead"),
         )
         return web.json_response(asdict(response))
 
@@ -367,7 +435,9 @@ class BridgeServer:
 
         converse_request = ConverseRequest(
             message_text=body.get("message_text", ""),
-            conversation_session_id=body.get("conversation_session_id"),
+            conversation_session_id=_validate_session_id(
+                body.get("conversation_session_id")
+            ),
             model_hint=body.get("model_hint"),
             system_prompt=system_prompt,
         )
@@ -473,13 +543,14 @@ class BridgeServer:
             JSON response with environment configuration details.
         """
         claude_md_path = ENVIRONMENT_DIR / "CLAUDE.md"
-        claude_md_content = ""
+        claude_md_preview = ""
         if claude_md_path.exists():
-            claude_md_content = claude_md_path.read_text()
+            with claude_md_path.open(encoding="utf-8") as f:
+                claude_md_preview = f.read(200)
 
         response = EnvironmentResponse(
             claude_md_hash=_compute_file_hash(claude_md_path),
-            claude_md_preview=claude_md_content[:200],
+            claude_md_preview=claude_md_preview,
             loaded_commands=_list_commands(),
             permissions_summary=_read_permissions(),
             mcp_servers=_read_mcp_config(),
@@ -509,14 +580,14 @@ class BridgeServer:
         settings_path = ENVIRONMENT_DIR / ".claude" / "settings.json"
         if settings_path.exists():
             try:
-                json.loads(settings_path.read_text())
+                json.loads(settings_path.read_text(encoding="utf-8"))
             except json.JSONDecodeError as parse_error:
                 error_messages.append(f"settings.json parse error: {parse_error}")
 
         mcp_path = ENVIRONMENT_DIR / "mcp.json"
         if mcp_path.exists():
             try:
-                json.loads(mcp_path.read_text())
+                json.loads(mcp_path.read_text(encoding="utf-8"))
             except json.JSONDecodeError as parse_error:
                 error_messages.append(f"mcp.json parse error: {parse_error}")
 
@@ -565,21 +636,18 @@ def create_application(shared_secret: str) -> web.Application:
 
 def main() -> None:
     """Entry point for the bridge server."""
-    log_level_name = os.environ.get("LOG_LEVEL", "info").upper()
-    log_level = getattr(logging, log_level_name, logging.INFO)
+    options = _load_options()
+    log_level_name = str(options.get("log_level", "info")).upper()
+    if log_level_name not in VALID_LOG_LEVELS:
+        log_level_name = "INFO"
+
     logging.basicConfig(
-        level=log_level,
+        level=getattr(logging, log_level_name, logging.INFO),
         format="[%(name)s] %(levelname)s: %(message)s",
         stream=sys.stdout,
     )
 
-    options = _load_options()
-    log_level_option = str(options.get("log_level", "info"))
-    logging.getLogger().setLevel(
-        getattr(logging, log_level_option.upper(), logging.INFO)
-    )
-
-    shared_secret = load_or_create_secret()
+    shared_secret = load_shared_secret()
     application = create_application(shared_secret)
 
     port = 8099

@@ -29,7 +29,7 @@ class ConfiguredModels(TypedDict):
     smart: str
 
 
-class PermissionsSummary(TypedDict, total=False):
+class PermissionsSummary(TypedDict):
     """Summary of tool permissions from settings.json."""
 
     allow: list[str]
@@ -50,6 +50,7 @@ class HealthResponse:
     configured_models: ConfiguredModels
     mcp_servers: list[McpServerInfo]
     request_timeout_seconds: int
+    sshd: str = "unknown"
 
 
 @dataclass
